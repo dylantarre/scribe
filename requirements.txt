@@ -1,0 +1,5 @@
+yt-dlp
+git+https://github.com/openai/whisper.git@v20231117
+torch>=2.0.0
+tqdm
+numpy>=1.23.5 
