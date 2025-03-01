@@ -149,7 +149,7 @@ def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragrap
     
     # Use Whisper for transcription
     try:
-        print("Transcribing with Whisper (medium model for better performance)...")
+        print("Transcribing with Whisper (turbo model for fast processing with good accuracy)...")
         
         # Use the full audio file instead of a test segment
         audio_to_transcribe = audio_path
@@ -157,8 +157,8 @@ def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragrap
         # Use python3 explicitly instead of python
         whisper_cmd = [
             "python3", "-m", "whisper", audio_to_transcribe,
-            "--model", "medium",  # Using medium model for better performance
-            "--language", "en",  # Always use English, no need for language detection
+            "--model", "turbo",  # Using turbo model for fast processing with good accuracy
+            "--language", "en",  # Always use English
             "--task", "transcribe",  # Specify transcribe task (skips language detection)
             "--output_dir", output_dir,
             "--output_format", "all",  # Use 'all' to generate all formats
@@ -167,10 +167,10 @@ def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragrap
         ]
         
         print(f"Running command: {' '.join(whisper_cmd)}")
-        print("This may take a few minutes with the medium model...")
+        print("This should process quickly with the turbo model...")
         
-        # Run with a timeout of 15 minutes for the full audio with medium model
-        result = subprocess.run(whisper_cmd, capture_output=True, text=True, check=True, timeout=900)
+        # Run with a timeout of 10 minutes for the full audio with turbo model
+        result = subprocess.run(whisper_cmd, capture_output=True, text=True, check=True, timeout=600)
         print(result.stdout)
         
         # Check if output files were created
