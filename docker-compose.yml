@@ -12,7 +12,7 @@ services:
       - TZ=UTC
     restart: unless-stopped
     # Override the default command if needed
-    # command: python monitor.py  # Uncomment to use monitor.py instead
+    command: python monitor.py  # Run monitor.py to continuously check for new videos
     labels:
       - "com.centurylinklabs.watchtower.enable=true"  # Enable auto-updates with Watchtower if you use it
       - "traefik.enable=false"  # Disable Traefik routing as this is a background service
