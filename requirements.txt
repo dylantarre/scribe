@@ -1,5 +1,9 @@
-yt-dlp
-git+https://github.com/openai/whisper.git@v20231117
+yt-dlp>=2023.11.14
+python-dotenv>=1.0.0
+requests>=2.31.0
+sqlite3-api>=0.1.0
+pathlib>=1.0.1
 torch>=2.0.0
-tqdm
-numpy>=1.23.5 
+numpy>=1.24.0
+tqdm>=4.65.0
+pydub 

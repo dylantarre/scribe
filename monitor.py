@@ -1,84 +1,90 @@
-import yt_dlp
+#!/usr/bin/env python3
+
 import time
 import sqlite3
+import os
+import argparse
 from datetime import datetime, timedelta
-from main import transcribe_youtube
+from dotenv import load_dotenv
+import subprocess
+import sys
+import signal
 
-CHANNELS = [
-    "https://www.youtube.com/@theneedledrop",
-    "https://www.youtube.com/@fantano"
-]
-CHECK_INTERVAL = 120  # 2 minutes
+# Import from latest_video.py
+from latest_video import get_latest_video, transcribe_latest_video, init_db
 
-def init_monitor_db():
-    conn = sqlite3.connect('data/monitor.db')
-    c = conn.cursor()
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS processed_videos (
-        video_id TEXT PRIMARY KEY,
-        channel TEXT,
-        processed_date TEXT
-    )
-    ''')
-    conn.commit()
-    return conn
+# Load environment variables
+load_dotenv()
+# Also try to load from config directory
+if os.path.exists('config/.env'):
+    load_dotenv('config/.env')
 
-def get_latest_videos(channel_url):
-    ydl_opts = {
-        'quiet': True,
-        'extract_flat': True,
-        'playlist_items': '1-5'  # Only check latest 5 videos
-    }
-    
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(f"{channel_url}/videos", download=False)
-            return [(entry['id'], f"https://www.youtube.com/watch?v={entry['id']}", channel_url) 
-                   for entry in info['entries'] if entry]
-        except Exception as e:
-            print(f"Error checking {channel_url}: {str(e)}")
-            return []
+# Configuration
+MONITORING_INTERVAL = int(os.getenv("MONITORING_INTERVAL", 3600))  # Default: 1 hour
+ENABLE_MONITORING = os.getenv("ENABLE_MONITORING", "0") == "1"
+MONITOR_CHANNELS = os.getenv("MONITOR_CHANNELS", "@fantano,@theneedledrop").split(",")
+
+# Default settings
+CHANNEL = "@fantano"  # Default to @fantano
+CHECK_INTERVAL = 120  # Check every 2 minutes (in seconds)
+
+# Handle graceful shutdown
+running = True
+
+def signal_handler(sig, frame):
+    global running
+    print("\nShutting down monitor gracefully...")
+    running = False
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 def monitor_channels():
-    conn = init_monitor_db()
-    cursor = conn.cursor()
+    """
+    Continuously monitor channels for new videos and transcribe them
+    """
+    print(f"Starting YouTube channel monitor")
+    print(f"Monitoring channels: {', '.join(MONITOR_CHANNELS)}")
+    print(f"Checking interval: {MONITORING_INTERVAL} seconds")
     
-    print(f"Monitoring channels: {CHANNELS}")
-    print(f"Checking every {CHECK_INTERVAL} seconds...")
+    if not ENABLE_MONITORING:
+        print("Warning: Monitoring is disabled in .env file (ENABLE_MONITORING=0)")
+        print("Setting ENABLE_MONITORING=1 in .env to enable automatic monitoring")
     
-    while True:
-        for channel in CHANNELS:
-            videos = get_latest_videos(channel)
-            
-            for video_id, video_url, channel_url in videos:
-                # Check if we've already processed this video
-                cursor.execute('SELECT 1 FROM processed_videos WHERE video_id = ?', (video_id,))
-                if not cursor.fetchone():
-                    print(f"\nNew video detected on {channel}!")
-                    print(f"Processing: {video_url}")
-                    
-                    try:
-                        transcribe_youtube(video_url)
-                        
-                        # Mark as processed
-                        cursor.execute('''
-                            INSERT INTO processed_videos (video_id, channel, processed_date)
-                            VALUES (?, ?, ?)
-                        ''', (video_id, channel_url, datetime.now().isoformat()))
-                        conn.commit()
-                        
-                    except Exception as e:
-                        print(f"Error processing video {video_id}: {str(e)}")
+    while running:
+        print(f"\n--- Checking for new videos at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
         
-        # Clean up old entries (optional)
-        week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        cursor.execute('DELETE FROM processed_videos WHERE processed_date < ?', (week_ago,))
-        conn.commit()
+        for channel in MONITOR_CHANNELS:
+            channel = channel.strip()
+            if not channel:
+                continue
+                
+            print(f"Checking channel: {channel}")
+            try:
+                transcribe_latest_video(
+                    channel,
+                    filter_filler_words=False,
+                    add_paragraphs=True,
+                    force=False  # Don't force reprocessing
+                )
+            except Exception as e:
+                print(f"Error processing channel {channel}: {str(e)}")
         
-        time.sleep(CHECK_INTERVAL)
+        # Wait for next check if still running
+        if running:
+            print(f"Next check in {MONITORING_INTERVAL} seconds...")
+            # Sleep in smaller increments to allow for graceful shutdown
+            for _ in range(min(MONITORING_INTERVAL, 3600)):
+                if not running:
+                    break
+                time.sleep(1)
 
 if __name__ == "__main__":
     try:
         monitor_channels()
     except KeyboardInterrupt:
-        print("\nMonitoring stopped.") 
+        print("\nMonitor stopped by user")
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+    
+    print("Monitor shutdown complete") 
