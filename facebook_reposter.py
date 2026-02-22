@@ -13,12 +13,15 @@ if os.path.exists('config/.env'):
 FB_AUTO_REPOST = os.getenv("FB_AUTO_REPOST", "0") == "1"
 FB_PAGE_ID = os.getenv("FB_PAGE_ID", "")
 FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN", "")
+FB_USER_ACCESS_TOKEN = os.getenv("FB_USER_ACCESS_TOKEN", "")
 FB_NORMAL_VIDEO_DELAY_SECONDS = int(os.getenv("FB_NORMAL_VIDEO_DELAY_SECONDS", "86400"))
 FB_SHORTS_AS_REELS = os.getenv("FB_SHORTS_AS_REELS", "1") == "1"
 FB_REPOST_MESSAGE_TEMPLATE = os.getenv(
     "FB_REPOST_MESSAGE_TEMPLATE",
     "{title}",
 )
+
+_DERIVED_PAGE_ACCESS_TOKEN = None
 
 
 def init_facebook_db(db_path="latest_videos.db"):
@@ -59,7 +62,36 @@ def init_facebook_db(db_path="latest_videos.db"):
 
 
 def facebook_enabled():
-    return FB_AUTO_REPOST and bool(FB_PAGE_ID) and bool(FB_PAGE_ACCESS_TOKEN)
+    return FB_AUTO_REPOST and bool(FB_PAGE_ID) and bool(FB_PAGE_ACCESS_TOKEN or FB_USER_ACCESS_TOKEN)
+
+
+def _effective_page_access_token():
+    global _DERIVED_PAGE_ACCESS_TOKEN
+
+    if _DERIVED_PAGE_ACCESS_TOKEN:
+        return _DERIVED_PAGE_ACCESS_TOKEN
+
+    if FB_USER_ACCESS_TOKEN and FB_PAGE_ID:
+        try:
+            resp = requests.get(
+                f"https://graph.facebook.com/v22.0/{FB_PAGE_ID}",
+                params={
+                    "fields": "access_token",
+                    "access_token": FB_USER_ACCESS_TOKEN,
+                },
+                timeout=30,
+            )
+            if resp.ok:
+                token = resp.json().get("access_token")
+                if token:
+                    _DERIVED_PAGE_ACCESS_TOKEN = token
+                    return token
+            else:
+                print(f"Facebook token derivation failed: {resp.status_code} {resp.text[:300]}")
+        except Exception as exc:
+            print(f"Facebook token derivation error: {exc}")
+
+    return FB_PAGE_ACCESS_TOKEN
 
 
 def _iso_now():
@@ -132,10 +164,11 @@ def _build_message(video_url, title, description, channel):
 
 
 def _publish_link_to_facebook(video_url, message):
+    access_token = _effective_page_access_token()
     payload = {
         "message": message,
         "link": video_url,
-        "access_token": FB_PAGE_ACCESS_TOKEN,
+        "access_token": access_token,
     }
     endpoint = f"https://graph.facebook.com/v22.0/{FB_PAGE_ID}/feed"
     response = requests.post(endpoint, data=payload, timeout=30)
@@ -152,10 +185,11 @@ def _require_native_video_file(video_file_path, video_id):
 
 def _publish_native_video_to_facebook(video_file_path, title, message):
     endpoint = f"https://graph.facebook.com/v22.0/{FB_PAGE_ID}/videos"
+    access_token = _effective_page_access_token()
     payload = {
         "title": title,
         "description": message,
-        "access_token": FB_PAGE_ACCESS_TOKEN,
+        "access_token": access_token,
     }
     with open(video_file_path, "rb") as video_stream:
         files = {
@@ -168,12 +202,13 @@ def _publish_native_video_to_facebook(video_file_path, title, message):
 def _publish_reel_to_facebook(video_file_path, title, message):
     endpoint = f"https://graph.facebook.com/v22.0/{FB_PAGE_ID}/video_reels"
     file_size = os.path.getsize(video_file_path)
+    access_token = _effective_page_access_token()
 
     # Phase 1: start upload session
     start_resp = requests.post(
         endpoint,
         data={
-            "access_token": FB_PAGE_ACCESS_TOKEN,
+            "access_token": access_token,
             "upload_phase": "start",
         },
         timeout=60,
@@ -192,7 +227,7 @@ def _publish_reel_to_facebook(video_file_path, title, message):
         transfer_resp = requests.post(
             upload_url,
             headers={
-                "Authorization": f"OAuth {FB_PAGE_ACCESS_TOKEN}",
+                "Authorization": f"OAuth {access_token}",
                 "offset": "0",
                 "file_size": str(file_size),
             },
@@ -206,7 +241,7 @@ def _publish_reel_to_facebook(video_file_path, title, message):
     finish_resp = requests.post(
         endpoint,
         data={
-            "access_token": FB_PAGE_ACCESS_TOKEN,
+            "access_token": access_token,
             "video_id": video_id,
             "upload_phase": "finish",
             "video_state": "PUBLISHED",
@@ -230,11 +265,12 @@ def _resolve_post_id_from_response(data):
         return None
 
     try:
+        access_token = _effective_page_access_token()
         lookup = requests.get(
             f"https://graph.facebook.com/v22.0/{object_id}",
             params={
                 "fields": "post_id",
-                "access_token": FB_PAGE_ACCESS_TOKEN,
+                "access_token": access_token,
             },
             timeout=30,
         )
