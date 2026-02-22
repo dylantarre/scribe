@@ -32,10 +32,20 @@ def init_db():
         channel TEXT,
         video_id TEXT,
         title TEXT,
+        description TEXT,
+        video_file_path TEXT,
         processed_date TEXT,
         PRIMARY KEY (channel, video_id)
     )
     ''')
+
+    # Backfill old schema
+    cursor.execute("PRAGMA table_info(latest_videos)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "description" not in columns:
+        cursor.execute("ALTER TABLE latest_videos ADD COLUMN description TEXT")
+    if "video_file_path" not in columns:
+        cursor.execute("ALTER TABLE latest_videos ADD COLUMN video_file_path TEXT")
     
     conn.commit()
     return conn
@@ -48,7 +58,7 @@ def get_latest_video(channel_url):
         channel_url (str): YouTube channel URL or handle
         
     Returns:
-        tuple: (video_id, video_url, title) or None if error
+        dict: latest video metadata or None if error
     """
     # Format the channel URL if it's a handle
     if channel_url.startswith('@'):
@@ -74,9 +84,36 @@ def get_latest_video(channel_url):
                 video_id = video.get('id')
                 video_url = f"https://www.youtube.com/watch?v={video_id}"
                 title = video.get('title', 'Unknown Title')
-                
+
+                duration = video.get('duration')
+                description = video.get('description')
+                webpage_url = video.get('webpage_url') or video.get('url') or video_url
+
+                # Pull full metadata for better shorts detection + description capture.
+                try:
+                    detail_opts = {'quiet': True}
+                    with yt_dlp.YoutubeDL(detail_opts) as detail_ydl:
+                        detail_info = detail_ydl.extract_info(video_url, download=False)
+                    duration = detail_info.get('duration', duration)
+                    description = detail_info.get('description', description)
+                    webpage_url = detail_info.get('webpage_url', webpage_url)
+                except Exception as detail_err:
+                    print(f"Warning: Could not fetch detailed metadata for {video_id}: {detail_err}")
+                is_short = False
+                if isinstance(duration, (int, float)) and duration <= 60:
+                    is_short = True
+                if isinstance(webpage_url, str) and '/shorts/' in webpage_url:
+                    is_short = True
+
                 print(f"Found latest video: {title}")
-                return video_id, video_url, title
+                return {
+                    "video_id": video_id,
+                    "video_url": video_url,
+                    "title": title,
+                    "description": description,
+                    "duration": duration,
+                    "is_short": is_short,
+                }
             else:
                 print(f"No videos found for {channel_url}")
                 return None
@@ -97,9 +134,25 @@ def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragrap
     # Get the latest video info
     video_info = get_latest_video(channel_url)
     if not video_info:
-        return
-    
-    video_id, video_url, title = video_info
+        return {"status": "error", "channel": channel_url, "error": "latest_video_not_found"}
+
+    video_id = video_info["video_id"]
+    video_url = video_info["video_url"]
+    title = video_info["title"]
+    description = video_info.get("description")
+    is_short = video_info.get("is_short", False)
+
+    # Create output directory
+    channel_name = channel_url.split('/')[-1] if '/' in channel_url else channel_url
+    if channel_name.startswith('@'):
+        channel_name = channel_name[1:]  # Remove @ from handle
+
+    output_dir = os.path.join('transcripts', channel_name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    video_file_path = os.path.join(output_dir, f"{video_id}.mp4")
+    if not os.path.exists(video_file_path):
+        video_file_path = None
     
     # Check if we've already processed this video
     conn = init_db()
@@ -111,18 +164,41 @@ def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragrap
     if result and not force:
         print(f"Video {video_id} has already been processed. Skipping.")
         conn.close()
-        return
+        return {
+            "status": "skipped",
+            "channel": channel_url,
+            "video_id": video_id,
+            "video_url": video_url,
+            "title": title,
+            "description": description,
+            "video_file_path": video_file_path,
+            "is_short": is_short,
+        }
     elif result and force:
         print(f"Video {video_id} has already been processed, but force flag is set. Reprocessing...")
     
-    # Create output directory
-    channel_name = channel_url.split('/')[-1] if '/' in channel_url else channel_url
-    if channel_name.startswith('@'):
-        channel_name = channel_name[1:]  # Remove @ from handle
-    
-    output_dir = os.path.join('transcripts', channel_name)
-    os.makedirs(output_dir, exist_ok=True)
-    
+    # Download video for native Facebook video uploads
+    if not video_file_path:
+        print(f"Downloading video for {title}...")
+        video_base = os.path.join(output_dir, video_id)
+        ydl_video_opts = {
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'merge_output_format': 'mp4',
+            'outtmpl': f"{video_base}.%(ext)s",
+            'quiet': False,
+        }
+        with yt_dlp.YoutubeDL(ydl_video_opts) as ydl:
+            ydl.download([video_url])
+
+        preferred_path = os.path.join(output_dir, f"{video_id}.mp4")
+        if os.path.exists(preferred_path):
+            video_file_path = preferred_path
+        else:
+            candidates = sorted(Path(output_dir).glob(f"{video_id}.*"))
+            video_file_path = str(candidates[0]) if candidates else None
+    else:
+        print(f"Video file already exists: {video_file_path}")
+
     # Download audio
     audio_path = os.path.join(output_dir, f"{video_id}.mp3")
     
@@ -188,29 +264,74 @@ def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragrap
             else:
                 print(f"Warning: Expected output file not found: {file_path}")
         
-        # Mark as processed
-        if not result:
-            cursor.execute(
-                "INSERT INTO latest_videos (channel, video_id, title, processed_date) VALUES (?, ?, ?, ?)",
-                (channel_url, video_id, title, datetime.now().isoformat())
-            )
-        else:
-            cursor.execute(
-                "UPDATE latest_videos SET processed_date = ? WHERE channel = ? AND video_id = ?",
-                (datetime.now().isoformat(), channel_url, video_id)
-            )
+        # Mark as processed (insert on first run, refresh timestamp on re-run)
+        cursor.execute(
+            """
+            INSERT INTO latest_videos (channel, video_id, title, description, video_file_path, processed_date)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(channel, video_id)
+            DO UPDATE SET
+                title = excluded.title,
+                description = excluded.description,
+                video_file_path = excluded.video_file_path,
+                processed_date = excluded.processed_date
+            """,
+            (channel_url, video_id, title, description, video_file_path, datetime.now().isoformat()),
+        )
         conn.commit()
         conn.close()
         
         print(f"Whisper transcription completed for {title}")
+        return {
+            "status": "processed",
+            "channel": channel_url,
+            "video_id": video_id,
+            "video_url": video_url,
+            "title": title,
+            "description": description,
+            "video_file_path": video_file_path,
+            "is_short": is_short,
+        }
     except subprocess.CalledProcessError as e:
         print(f"Error with Whisper transcription: {e.stderr}")
         conn.close()
+        return {
+            "status": "error",
+            "channel": channel_url,
+            "video_id": video_id,
+            "video_url": video_url,
+            "title": title,
+            "description": description,
+            "video_file_path": video_file_path,
+            "is_short": is_short,
+            "error": e.stderr,
+        }
     except Exception as e:
         print(f"Unexpected error with Whisper: {str(e)}")
         conn.close()
+        return {
+            "status": "error",
+            "channel": channel_url,
+            "video_id": video_id,
+            "video_url": video_url,
+            "title": title,
+            "description": description,
+            "video_file_path": video_file_path,
+            "is_short": is_short,
+            "error": str(e),
+        }
     
     print(f"Successfully processed latest video from {channel_url}")
+    return {
+        "status": "processed",
+        "channel": channel_url,
+        "video_id": video_id,
+        "video_url": video_url,
+        "title": title,
+        "description": description,
+        "video_file_path": video_file_path,
+        "is_short": is_short,
+    }
 
 if __name__ == "__main__":
     # Initialize database

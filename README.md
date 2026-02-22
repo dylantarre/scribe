@@ -19,10 +19,10 @@ A Docker-based service that automatically downloads and transcribes YouTube vide
 
 ### Quick Start
 
-1. Clone this repository to your server:
+1. Clone this repository to your server (make sure to specify the `scribe` branch):
    ```bash
-   git clone https://github.com/yourusername/youtube-transcription.git
-   cd youtube-transcription
+   git clone -b scribe https://github.com/dylantarre/scribe.git
+   cd scribe
    ```
 
 2. Create your `.env` file:
@@ -70,6 +70,29 @@ In your `.env` file:
 - `ENABLE_MONITORING`: Set to 1 to enable automatic monitoring
 - `MONITORING_INTERVAL`: How often to check for new videos (in seconds)
 - `MONITOR_CHANNELS`: Comma-separated list of YouTube channels to monitor
+- `FB_AUTO_REPOST`: Set to 1 to auto-repost videos to Facebook
+- `FB_PAGE_ID`: Your Facebook Page ID
+- `FB_PAGE_ACCESS_TOKEN`: A page access token with permission to publish posts
+- `FB_NORMAL_VIDEO_DELAY_SECONDS`: Delay for non-Short videos before posting (default: 86400)
+- `FB_SHORTS_AS_REELS`: If set to 1, Shorts are uploaded to Reels first
+- `FB_REPOST_MESSAGE_TEMPLATE`: Facebook post template with placeholders `{channel}`, `{title}`, `{description}`, `{url}` (omit `{url}` if you do not want YouTube links in captions)
+- `CLASSIC_AUTO_REPOST`: Enable weekly classic repost selection
+- `CLASSIC_CHANNELS`: Channels to select classics from
+- `CLASSIC_POST_DAY`: Day to run classic selection (e.g. `wednesday`)
+- `CLASSIC_POST_HOUR`: Local hour for classic selection window
+- `CLASSIC_POST_MINUTE`: Local minute for classic selection window
+- `CLASSIC_POST_TZ`: Timezone for classic scheduling (e.g. `America/Chicago`)
+- `CLASSIC_TOP_CANDIDATES`: How many top popular videos to scan per channel
+- `CLASSIC_INCLUDE_SHORTS`: Include Shorts in classic selection (`0` recommended)
+
+### Facebook Reposting Behavior
+
+- Shorts are reposted immediately.
+- Normal videos are reposted after `FB_NORMAL_VIDEO_DELAY_SECONDS` (default: 1 day).
+- YouTube description text is saved and reused in the Facebook post body.
+- Shorts attempt Reels upload (`/video_reels`) and fall back to normal video upload if Reels is unavailable.
+- Posts are uploaded as native Facebook video posts when the local video file is available.
+- Weekly classics can be queued once per week (Wednesday morning by default) from top popular videos, with duplicate prevention.
 
 ## IP Rotation for YouTube Downloads
 
