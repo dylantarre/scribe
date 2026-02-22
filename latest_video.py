@@ -21,6 +21,25 @@ load_dotenv()
 if os.path.exists('config/.env'):
     load_dotenv('config/.env')
 
+ENABLE_TRANSCRIPTION = os.getenv("ENABLE_TRANSCRIPTION", "0") == "1"
+
+
+def _upsert_latest_video(cursor, channel_url, video_id, title, description, video_file_path):
+    cursor.execute(
+        """
+        INSERT INTO latest_videos (channel, video_id, title, description, video_file_path, processed_date)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(channel, video_id)
+        DO UPDATE SET
+            title = excluded.title,
+            description = excluded.description,
+            video_file_path = excluded.video_file_path,
+            processed_date = excluded.processed_date
+        """,
+        (channel_url, video_id, title, description, video_file_path, datetime.now().isoformat()),
+    )
+
+
 def init_db():
     """Initialize SQLite database for tracking processed videos"""
     conn = sqlite3.connect('latest_videos.db')
@@ -199,6 +218,22 @@ def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragrap
     else:
         print(f"Video file already exists: {video_file_path}")
 
+    if not ENABLE_TRANSCRIPTION:
+        print("Transcription disabled (ENABLE_TRANSCRIPTION=0). Skipping audio download and Whisper.")
+        _upsert_latest_video(cursor, channel_url, video_id, title, description, video_file_path)
+        conn.commit()
+        conn.close()
+        return {
+            "status": "processed",
+            "channel": channel_url,
+            "video_id": video_id,
+            "video_url": video_url,
+            "title": title,
+            "description": description,
+            "video_file_path": video_file_path,
+            "is_short": is_short,
+        }
+
     # Download audio
     audio_path = os.path.join(output_dir, f"{video_id}.mp3")
     
@@ -265,19 +300,7 @@ def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragrap
                 print(f"Warning: Expected output file not found: {file_path}")
         
         # Mark as processed (insert on first run, refresh timestamp on re-run)
-        cursor.execute(
-            """
-            INSERT INTO latest_videos (channel, video_id, title, description, video_file_path, processed_date)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(channel, video_id)
-            DO UPDATE SET
-                title = excluded.title,
-                description = excluded.description,
-                video_file_path = excluded.video_file_path,
-                processed_date = excluded.processed_date
-            """,
-            (channel_url, video_id, title, description, video_file_path, datetime.now().isoformat()),
-        )
+        _upsert_latest_video(cursor, channel_url, video_id, title, description, video_file_path)
         conn.commit()
         conn.close()
         

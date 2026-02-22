@@ -11,7 +11,7 @@ import sys
 import signal
 
 # Import from latest_video.py
-from latest_video import get_latest_video, transcribe_latest_video, init_db
+from latest_video import get_latest_video, transcribe_latest_video, init_db, ENABLE_TRANSCRIPTION
 from facebook_reposter import enqueue_facebook_repost, publish_due_facebook_reposts, facebook_enabled
 from classic_reposter import run_weekly_classic_reposts
 
@@ -48,6 +48,7 @@ def monitor_channels():
     print(f"Starting YouTube channel monitor")
     print(f"Monitoring channels: {', '.join(MONITOR_CHANNELS)}")
     print(f"Checking interval: {MONITORING_INTERVAL} seconds")
+    print(f"Transcription enabled: {ENABLE_TRANSCRIPTION}")
     print(f"Facebook reposting enabled: {facebook_enabled()}")
     
     if not ENABLE_MONITORING:

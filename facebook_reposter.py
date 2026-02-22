@@ -142,6 +142,14 @@ def _publish_link_to_facebook(video_url, message):
     return response
 
 
+def _require_native_video_file(video_file_path, video_id):
+    if video_file_path and os.path.exists(video_file_path):
+        return
+    raise FileNotFoundError(
+        f"Missing local video file for {video_id}; native upload required, link-post fallback disabled."
+    )
+
+
 def _publish_native_video_to_facebook(video_file_path, title, message):
     endpoint = f"https://graph.facebook.com/v22.0/{FB_PAGE_ID}/videos"
     payload = {
@@ -269,16 +277,14 @@ def publish_due_facebook_reposts(db_path="latest_videos.db", limit=20):
     for video_id, channel, title, description, video_file_path, video_url, is_short, attempts in rows:
         try:
             message = _build_message(video_url, title, description, channel)
-            if video_file_path and os.path.exists(video_file_path):
-                if is_short and FB_SHORTS_AS_REELS:
-                    response = _publish_reel_to_facebook(video_file_path, title, message)
-                    if not response.ok:
-                        print(f"Reels upload failed for {video_id}, falling back to /videos endpoint.")
-                        response = _publish_native_video_to_facebook(video_file_path, title, message)
-                else:
+            _require_native_video_file(video_file_path, video_id)
+            if is_short and FB_SHORTS_AS_REELS:
+                response = _publish_reel_to_facebook(video_file_path, title, message)
+                if not response.ok:
+                    print(f"Reels upload failed for {video_id}, falling back to /videos endpoint.")
                     response = _publish_native_video_to_facebook(video_file_path, title, message)
             else:
-                response = _publish_link_to_facebook(video_url, message)
+                response = _publish_native_video_to_facebook(video_file_path, title, message)
             if response.ok:
                 data = response.json()
                 post_id = _resolve_post_id_from_response(data)
