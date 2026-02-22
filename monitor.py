@@ -12,6 +12,8 @@ import signal
 
 # Import from latest_video.py
 from latest_video import get_latest_video, transcribe_latest_video, init_db
+from facebook_reposter import enqueue_facebook_repost, publish_due_facebook_reposts, facebook_enabled
+from classic_reposter import run_weekly_classic_reposts
 
 # Load environment variables
 load_dotenv()
@@ -46,6 +48,7 @@ def monitor_channels():
     print(f"Starting YouTube channel monitor")
     print(f"Monitoring channels: {', '.join(MONITOR_CHANNELS)}")
     print(f"Checking interval: {MONITORING_INTERVAL} seconds")
+    print(f"Facebook reposting enabled: {facebook_enabled()}")
     
     if not ENABLE_MONITORING:
         print("Warning: Monitoring is disabled in .env file (ENABLE_MONITORING=0)")
@@ -61,14 +64,39 @@ def monitor_channels():
                 
             print(f"Checking channel: {channel}")
             try:
-                transcribe_latest_video(
+                result = transcribe_latest_video(
                     channel,
                     filter_filler_words=False,
                     add_paragraphs=True,
                     force=False  # Don't force reprocessing
                 )
+
+                if result and result.get("status") in ("processed", "skipped", "error"):
+                    enqueue_facebook_repost(
+                        video_id=result["video_id"],
+                        channel=result["channel"],
+                        title=result["title"],
+                        description=result.get("description"),
+                        video_file_path=result.get("video_file_path"),
+                        video_url=result["video_url"],
+                        is_short=result.get("is_short", False),
+                    )
             except Exception as e:
                 print(f"Error processing channel {channel}: {str(e)}")
+
+        try:
+            classic_count = run_weekly_classic_reposts()
+            if classic_count:
+                print(f"Queued {classic_count} weekly classic repost(s).")
+        except Exception as e:
+            print(f"Error running weekly classic reposts: {str(e)}")
+
+        try:
+            published_count = publish_due_facebook_reposts()
+            if published_count:
+                print(f"Published {published_count} scheduled Facebook repost(s).")
+        except Exception as e:
+            print(f"Error publishing Facebook reposts: {str(e)}")
         
         # Wait for next check if still running
         if running:
