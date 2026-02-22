@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -22,6 +22,7 @@ CLASSIC_POST_MINUTE = int(os.getenv("CLASSIC_POST_MINUTE", "0"))
 CLASSIC_POST_TZ = os.getenv("CLASSIC_POST_TZ", os.getenv("TZ", "UTC"))
 CLASSIC_TOP_CANDIDATES = int(os.getenv("CLASSIC_TOP_CANDIDATES", "50"))
 CLASSIC_INCLUDE_SHORTS = os.getenv("CLASSIC_INCLUDE_SHORTS", "0") == "1"
+CLASSIC_MIN_AGE_YEARS = int(os.getenv("CLASSIC_MIN_AGE_YEARS", "3"))
 
 DAY_MAP = {
     "mon": 0, "monday": 0,
@@ -172,6 +173,7 @@ def _fetch_top_candidates(channel, limit):
 
         duration = detail.get("duration")
         webpage_url = detail.get("webpage_url", video_url)
+        upload_date = detail.get("upload_date")
         is_short = False
         if isinstance(duration, (int, float)) and duration <= 60:
             is_short = True
@@ -180,6 +182,15 @@ def _fetch_top_candidates(channel, limit):
         if is_short and not CLASSIC_INCLUDE_SHORTS:
             continue
 
+        if upload_date and len(str(upload_date)) == 8:
+            try:
+                published_date = datetime.strptime(str(upload_date), "%Y%m%d").date()
+                cutoff_date = (datetime.now(timezone.utc) - timedelta(days=365 * CLASSIC_MIN_AGE_YEARS)).date()
+                if published_date > cutoff_date:
+                    continue
+            except Exception:
+                pass
+
         candidates.append(
             {
                 "video_id": video_id,
@@ -187,6 +198,7 @@ def _fetch_top_candidates(channel, limit):
                 "title": detail.get("title") or entry.get("title") or "Unknown Title",
                 "description": detail.get("description") or "",
                 "view_count": detail.get("view_count") or 0,
+                "upload_date": upload_date,
                 "duration": duration,
                 "is_short": is_short,
                 "channel": channel,
