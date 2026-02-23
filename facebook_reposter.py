@@ -184,7 +184,7 @@ def _require_native_video_file(video_file_path, video_id):
 
 
 def _publish_native_video_to_facebook(video_file_path, title, message):
-    endpoint = f"https://graph.facebook.com/v22.0/{FB_PAGE_ID}/videos"
+    endpoint = f"https://graph-video.facebook.com/v22.0/{FB_PAGE_ID}/videos"
     access_token = _effective_page_access_token()
     payload = {
         "title": title,
@@ -203,7 +203,7 @@ def _publish_native_video_to_facebook(video_file_path, title, message):
 
 
 def _publish_native_video_resumable(video_file_path, title, message):
-    endpoint = f"https://graph.facebook.com/v22.0/{FB_PAGE_ID}/videos"
+    endpoint = f"https://graph-video.facebook.com/v22.0/{FB_PAGE_ID}/videos"
     access_token = _effective_page_access_token()
     file_size = os.path.getsize(video_file_path)
 
@@ -217,6 +217,7 @@ def _publish_native_video_resumable(video_file_path, title, message):
         timeout=60,
     )
     if not start_resp.ok:
+        print(f"Resumable start failed: {start_resp.status_code} {start_resp.text[:500]}")
         return start_resp
 
     start_data = start_resp.json()
@@ -224,6 +225,7 @@ def _publish_native_video_resumable(video_file_path, title, message):
     start_offset = start_data.get("start_offset")
     end_offset = start_data.get("end_offset")
     if not upload_session_id or start_offset is None or end_offset is None:
+        print(f"Resumable start missing fields: {start_resp.text[:500]}")
         return start_resp
 
     with open(video_file_path, "rb") as video_stream:
@@ -247,6 +249,7 @@ def _publish_native_video_resumable(video_file_path, title, message):
                 timeout=600,
             )
             if not transfer_resp.ok:
+                print(f"Resumable transfer failed: {transfer_resp.status_code} {transfer_resp.text[:500]}")
                 return transfer_resp
             transfer_data = transfer_resp.json()
             start_offset = transfer_data.get("start_offset", end_offset)
@@ -263,6 +266,8 @@ def _publish_native_video_resumable(video_file_path, title, message):
         },
         timeout=180,
     )
+    if not finish_resp.ok:
+        print(f"Resumable finish failed: {finish_resp.status_code} {finish_resp.text[:500]}")
     return finish_resp
 
 
