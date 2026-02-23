@@ -196,7 +196,74 @@ def _publish_native_video_to_facebook(video_file_path, title, message):
             "source": (os.path.basename(video_file_path), video_stream, "video/mp4"),
         }
         response = requests.post(endpoint, data=payload, files=files, timeout=600)
+    if response.status_code == 413:
+        print("Native /videos upload returned 413; retrying with resumable upload.")
+        return _publish_native_video_resumable(video_file_path, title, message)
     return response
+
+
+def _publish_native_video_resumable(video_file_path, title, message):
+    endpoint = f"https://graph.facebook.com/v22.0/{FB_PAGE_ID}/videos"
+    access_token = _effective_page_access_token()
+    file_size = os.path.getsize(video_file_path)
+
+    start_resp = requests.post(
+        endpoint,
+        data={
+            "access_token": access_token,
+            "upload_phase": "start",
+            "file_size": str(file_size),
+        },
+        timeout=60,
+    )
+    if not start_resp.ok:
+        return start_resp
+
+    start_data = start_resp.json()
+    upload_session_id = start_data.get("upload_session_id")
+    start_offset = start_data.get("start_offset")
+    end_offset = start_data.get("end_offset")
+    if not upload_session_id or start_offset is None or end_offset is None:
+        return start_resp
+
+    with open(video_file_path, "rb") as video_stream:
+        while str(start_offset) != str(end_offset):
+            start_i = int(start_offset)
+            end_i = int(end_offset)
+            chunk_size = max(0, end_i - start_i)
+            video_stream.seek(start_i)
+            chunk = video_stream.read(chunk_size)
+            transfer_resp = requests.post(
+                endpoint,
+                data={
+                    "access_token": access_token,
+                    "upload_phase": "transfer",
+                    "upload_session_id": upload_session_id,
+                    "start_offset": str(start_offset),
+                },
+                files={
+                    "video_file_chunk": ("chunk.bin", chunk, "application/octet-stream"),
+                },
+                timeout=600,
+            )
+            if not transfer_resp.ok:
+                return transfer_resp
+            transfer_data = transfer_resp.json()
+            start_offset = transfer_data.get("start_offset", end_offset)
+            end_offset = transfer_data.get("end_offset", end_offset)
+
+    finish_resp = requests.post(
+        endpoint,
+        data={
+            "access_token": access_token,
+            "upload_phase": "finish",
+            "upload_session_id": upload_session_id,
+            "title": title,
+            "description": message,
+        },
+        timeout=180,
+    )
+    return finish_resp
 
 
 def _publish_reel_to_facebook(video_file_path, title, message):

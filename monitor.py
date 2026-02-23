@@ -93,7 +93,8 @@ def monitor_channels():
             print(f"Error running weekly classic reposts: {str(e)}")
 
         try:
-            published_count = publish_due_facebook_reposts()
+            # Keep Facebook uploads strictly one-at-a-time per loop.
+            published_count = publish_due_facebook_reposts(limit=1)
             if published_count:
                 print(f"Published {published_count} scheduled Facebook repost(s).")
         except Exception as e:
