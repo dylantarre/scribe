@@ -119,7 +119,7 @@ def get_latest_video(channel_url):
                 except Exception as detail_err:
                     print(f"Warning: Could not fetch detailed metadata for {video_id}: {detail_err}")
                 is_short = False
-                if isinstance(duration, (int, float)) and duration <= 60:
+                if isinstance(duration, (int, float)) and duration <= 90:
                     is_short = True
                 if isinstance(webpage_url, str) and '/shorts/' in webpage_url:
                     is_short = True
