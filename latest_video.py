@@ -69,21 +69,22 @@ def init_db():
     conn.commit()
     return conn
 
-def get_latest_video(channel_url):
+def get_latest_video(channel_url, tab="videos"):
     """
     Get the latest video from a YouTube channel
-    
+
     Args:
         channel_url (str): YouTube channel URL or handle
-        
+        tab (str): YouTube tab to fetch from ("videos" or "shorts")
+
     Returns:
         dict: latest video metadata or None if error
     """
     # Format the channel URL if it's a handle
     if channel_url.startswith('@'):
-        channel_url = f"https://www.youtube.com/{channel_url}/videos"
+        channel_url = f"https://www.youtube.com/{channel_url}/{tab}"
     else:
-        channel_url = f"{channel_url}/videos"
+        channel_url = f"{channel_url}/{tab}"
     
     # Configure yt-dlp options
     ydl_opts = {
@@ -140,18 +141,19 @@ def get_latest_video(channel_url):
         print(f"Error fetching latest video from {channel_url}: {e}")
         return None
 
-def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragraphs=True, force=False):
+def transcribe_latest_video(channel_url, filter_filler_words=False, add_paragraphs=True, force=False, tab="videos"):
     """
     Check for and transcribe the latest video from a channel if it hasn't been processed
-    
+
     Args:
         channel_url (str): YouTube channel URL or handle
         filter_filler_words (bool): Whether to filter out filler words like "um", "uh", etc.
         add_paragraphs (bool): Whether to add paragraph breaks to the text
         force (bool): Whether to force reprocessing even if the video has been processed before
+        tab (str): YouTube tab to fetch from ("videos" or "shorts")
     """
     # Get the latest video info
-    video_info = get_latest_video(channel_url)
+    video_info = get_latest_video(channel_url, tab=tab)
     if not video_info:
         return {"status": "error", "channel": channel_url, "error": "latest_video_not_found"}
 

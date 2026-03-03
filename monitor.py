@@ -64,26 +64,28 @@ def monitor_channels():
                 continue
                 
             print(f"Checking channel: {channel}")
-            try:
-                result = transcribe_latest_video(
-                    channel,
-                    filter_filler_words=False,
-                    add_paragraphs=True,
-                    force=False  # Don't force reprocessing
-                )
-
-                if result and result.get("status") in ("processed", "skipped", "error"):
-                    enqueue_facebook_repost(
-                        video_id=result["video_id"],
-                        channel=result["channel"],
-                        title=result["title"],
-                        description=result.get("description"),
-                        video_file_path=result.get("video_file_path"),
-                        video_url=result["video_url"],
-                        is_short=result.get("is_short", False),
+            for tab in ("videos", "shorts"):
+                try:
+                    result = transcribe_latest_video(
+                        channel,
+                        filter_filler_words=False,
+                        add_paragraphs=True,
+                        force=False,
+                        tab=tab,
                     )
-            except Exception as e:
-                print(f"Error processing channel {channel}: {str(e)}")
+
+                    if result and result.get("status") in ("processed", "skipped", "error"):
+                        enqueue_facebook_repost(
+                            video_id=result["video_id"],
+                            channel=result["channel"],
+                            title=result["title"],
+                            description=result.get("description"),
+                            video_file_path=result.get("video_file_path"),
+                            video_url=result["video_url"],
+                            is_short=result.get("is_short", False),
+                        )
+                except Exception as e:
+                    print(f"Error processing channel {channel} ({tab}): {str(e)}")
 
         try:
             classic_count = run_weekly_classic_reposts()
